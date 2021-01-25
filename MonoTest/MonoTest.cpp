@@ -3,7 +3,9 @@
 
 #include "pch.h"
 #include <iostream>
+#include <typeinfo>
 #include <vector>
+#include <list>
 #include <string>
 #include <mono/jit/jit.h>
 #include <mono/metadata/assembly.h>
@@ -12,30 +14,59 @@
 #include <mono/metadata/mono-config.h>
 using namespace std;
 
-
-//C++的类定义
-
-class Component
+struct vec3
 {
 public:
-	virtual int id() const { return 0; };
-	int value;
+
+	float x;
+	float y;
+	float z;
+	vec3() { x = 0; y = 0; z = 0; }
+	vec3(float newx, float newy, float newz) { x = newx; y = newy; z = newz; }
+};
+
+//C++的类定义
+class Object;
+class GameObject;
+class Component;
+class Transfrom;
+
+class Object
+{
+public:
+	virtual int tid() const { return 0; }
+};
+
+class Component:public Object
+{
+public:
+	virtual int tid() const { return 2; }
+
+	GameObject * gameObject;
+
+	Component() { this->gameObject = nullptr; }
 };
 
 class Transform: public Component
 {
 public:
-	int id() const { return 1; }
+	int tid() const { return 3; }
+	vec3 position;
+	vec3 rotation;
+	vec3 scale;
+	Transform() { position = vec3(); rotation = vec3(); scale = vec3(1.0f, 1.0f, 1.0f); }
 };
 
-class GameObject
+class GameObject :public Object
 {
 public:
+	int tid() const { return 1; }
 	vector<Component *> components;
 };
 class Scene
 {
 public:
+	int tid() const { return 999; }
 	vector<GameObject *> gameObjects;
 };
 
@@ -56,17 +87,67 @@ MonoClassField * monofieldComponentHandle;
 MonoClass * monoclassTransform;
 MonoClassField * monofieldTransformHandle;
 
+MonoClass * monoclassVec3;
+MonoClassField * monofieldVec3x;
+MonoClassField * monofieldVec3y;
+MonoClassField * monofieldVec3z;
+
 //Global
 Scene mainScene;
 MonoDomain *domain;
 
+
+void MonoCSharp_Object_Destroy(Object * obj)
+{
+	cout << "try to del.." << (unsigned int)obj  << endl;
+
+	switch (obj->tid())
+	{
+	case 1://gameObject
+	{
+		GameObject * gameObj = reinterpret_cast<GameObject *>(obj);
+		for (size_t i = 0; i < gameObj->components.size(); i++)
+		{
+			delete gameObj->components[i];
+		}
+		break;
+	}
+	case 2://component
+	case 3:
+	{
+		cout << "is component" << endl;
+		Component * com = reinterpret_cast<Component *>(obj);
+		GameObject * ownerGameObj = com->gameObject;
+		if (ownerGameObj != nullptr)
+		{
+			for (vector<Component *>::iterator it = ownerGameObj->components.begin(); it != ownerGameObj->components.end();)
+			{
+				cout << "it:::" << (unsigned int)*it << endl;
+				cout << "com::::" << (unsigned int)com << endl;
+				if (*it == com)
+				{
+					ownerGameObj->components.erase(it);
+					break;
+				}
+				it++;
+			}
+			cout << "C++ comsize:" << ownerGameObj->components.size() << endl;
+		}
+		delete com;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
 MonoObject * MonoCSharp_Scene_GetMainScene()
 {
-	MonoObject * scene = mono_object_new(domain, monoclassScene);
-	mono_runtime_object_init(scene);
+	MonoObject * mobjScene = mono_object_new(domain, monoclassScene);
+	mono_runtime_object_init(mobjScene);//调用构造函数.ctor
 	void* handle = &mainScene;
-	mono_field_set_value(scene, monofieldSceneHandle, &handle);
-	return scene;
+	mono_field_set_value(mobjScene, monofieldSceneHandle, &handle);
+	return  mobjScene;
 }
 
 MonoArray* MonoCSharp_Scene_GetGameObjects()
@@ -76,7 +157,7 @@ MonoArray* MonoCSharp_Scene_GetGameObjects()
 	for (size_t i = 0; i < mainScene.gameObjects.size(); i++)
 	{
 		MonoObject * obj = mono_object_new(domain, monoclassGameObject);
-		mono_runtime_object_init(obj);
+		//mono_runtime_object_init(obj);
 		void* handle = mainScene.gameObjects[i];
 		mono_field_set_value(obj, monofieldGameObjectHandle, &handle);
 		mono_array_set(array, MonoObject *, i, obj);
@@ -99,30 +180,82 @@ MonoArray * MonoCSharp_GameObject_get_components(MonoObject* objPtr)
 
 	for (size_t i = 0; i < gameobject->components.size(); ++i)
 	{
-		MonoObject* com = mono_object_new(domain, monoclassComponent);
-		mono_runtime_object_init(com);
-		void* handle = gameobject->components[i];//指针准确
-		mono_field_set_value(com, monofieldComponentHandle, &handle);
-		mono_array_set(array, MonoObject*, i, com);
+		if (typeid(*(gameobject->components[i])) == typeid(Transform))
+		{
+			MonoObject* com = mono_object_new(domain, monoclassTransform);
+			//mono_runtime_object_init(com);
+			void* handle = gameobject->components[i];
+			mono_field_set_value(com, monofieldTransformHandle, &handle);
+			mono_array_set(array, MonoObject*, i, com);
+		}
+		else if (typeid(*(gameobject->components[i])) == typeid(Component))
+		{
+			MonoObject* com = mono_object_new(domain, monoclassComponent);
+			//mono_runtime_object_init(com);
+			void* handle = gameobject->components[i];
+			mono_field_set_value(com, monofieldComponentHandle, &handle);
+			mono_array_set(array, MonoObject*, i, com);
+		}
 	}
 
 	return array;
 }
 
-int MonoCSharp_Component_get_ID(MonoObject * objPtr)
+void MonoCSharp_GameObject_AddComponent(GameObject * gameObj, Component * com)
+{
+	gameObj->components.push_back(com);
+	com->gameObject = gameObj;
+}
+
+int MonoCSharp_Component_get_TID(MonoObject * objPtr)
 {
 	Component * component;
 	mono_field_get_value(objPtr, monofieldComponentHandle, reinterpret_cast<void *>(&component));
-
-	return component->id();
+	return component->tid();
 }
 
-int MonoCSharp_Transform_get_ID(MonoObject * objPtr)
+void * MonoCSharp_Component_Construct()
+{
+	Transform * com = new Transform();
+	return reinterpret_cast<void *>(com);
+}
+
+int MonoCSharp_Transform_get_TID(MonoObject * objPtr)
 {
 	Transform * transform;
 	mono_field_get_value(objPtr, monofieldTransformHandle, reinterpret_cast<void *>(&transform));
 
-	return transform->id();
+	return transform->tid();
+}
+
+vec3 MonoCSharp_Transform_get_Position(Transform * transformPtr)
+{
+	return transformPtr->position;
+}
+
+void MonoCSharp_Transform_set_Position(Transform * transformPtr, vec3 pos)
+{
+	transformPtr->position = pos;
+}
+
+vec3 MonoCSharp_Transform_get_Rotation(Transform * transformPtr)
+{
+	return transformPtr->rotation;
+}
+
+void MonoCSharp_Transform_set_Rotation(Transform * transformPtr, vec3 rot)
+{
+	transformPtr->rotation = rot;
+}
+
+vec3 MonoCSharp_Transform_get_Scale(Transform * transformPtr)
+{
+	return transformPtr->scale;
+}
+
+void MonoCSharp_Transform_set_Scale(Transform * transformPtr, vec3 scale)
+{
+	transformPtr->scale = scale;
 }
 
 
@@ -144,47 +277,67 @@ int main()
 	MonoImage* image = mono_assembly_get_image(assembly);
 
 	monoclassScene = mono_class_from_name(image, "MonoCSharp", "Scene");
-	monofieldSceneHandle = mono_class_get_field_from_name(monoclassScene, "handle_scene");
+	monofieldSceneHandle = mono_class_get_field_from_name(monoclassScene, "handle");
 	monoclassGameObject = mono_class_from_name(image, "MonoCSharp", "GameObject");
-	monofieldGameObjectHandle = mono_class_get_field_from_name(monoclassGameObject, "handle_gameobj");
+	monofieldGameObjectHandle = mono_class_get_field_from_name(monoclassGameObject, "handle");
 	monoclassComponent = mono_class_from_name(image, "MonoCSharp", "Component");
-	monofieldComponentHandle = mono_class_get_field_from_name(monoclassComponent, "handle_com");
+	monofieldComponentHandle = mono_class_get_field_from_name(monoclassComponent, "handle");
 	monoclassTransform = mono_class_from_name(image, "MonoCSharp", "Transform");
-	monofieldTransformHandle = mono_class_get_field_from_name(monoclassTransform, "handle_transform");
+	monofieldTransformHandle = mono_class_get_field_from_name(monoclassTransform, "handle");
+
+	monoclassVec3 = mono_class_from_name(image, "MonoCSharp", "Vec3");
+	monofieldVec3x = mono_class_get_field_from_name(monoclassVec3, "x");
+	monofieldVec3y = mono_class_get_field_from_name(monoclassVec3, "y");
+	monofieldVec3z = mono_class_get_field_from_name(monoclassVec3, "z");
 
 	// =====================================================测试
 
-	for (int i = 0; i < 6; i++)//233, 234,235
+
+	// =====================================================初始化物体
+
+	cout << "*********************初始化场景*****************************" << endl;
+	for (int i = 0; i < 3; i++)//233, 234,235
 	{
 		Transform * transform = new Transform();
-		transform->value = 233;
 		Component * component = new Component();
-		component->value = 2333;
 		GameObject * newObj = new GameObject();
 		newObj->components.push_back(transform);
 		newObj->components.push_back(component);
+		transform->gameObject = newObj;
+		component->gameObject = newObj;
 		mainScene.gameObjects.push_back(newObj);
 
-		cout << "transform:id():" << transform->id() << endl;
-		cout << "component:id():" << component->id() << endl;
+		cout << "transform:id():" << transform->tid() << endl;
+		cout << "component:id():" << component->tid() << endl;
 		cout << "Transform组件指针：" << (unsigned int)transform << endl;
 		cout << "Component组件指针：" << (unsigned int)component << endl;
 	
-		cout << "-------------" << endl;
+		cout << "----游戏对象添加完毕----" << endl;
 	}
+	cout << "**************************************************************" << endl;
+
 	//======================================================交互测试
 
 	mono_add_internal_call("MonoCSharp.Scene::GetMainScene()", reinterpret_cast<void*>(MonoCSharp_Scene_GetMainScene));
+	mono_add_internal_call("MonoCSharp.Object::DestroyViaPtr", reinterpret_cast<void*>(MonoCSharp_Object_Destroy));
 	mono_add_internal_call("MonoCSharp.Scene::GetGameObjects()", reinterpret_cast<void*>(MonoCSharp_Scene_GetGameObjects));
 	mono_add_internal_call("MonoCSharp.GameObject::get_ComponentCount", reinterpret_cast<void*>(MonoCSharp_GameObject_get_ComponentCount));
 	mono_add_internal_call("MonoCSharp.GameObject::get_components", reinterpret_cast<void*>(MonoCSharp_GameObject_get_components));
-	mono_add_internal_call("MonoCSharp.Component::get_ID", reinterpret_cast<void*>(MonoCSharp_Component_get_ID));
-	mono_add_internal_call("MonoCSharp.Transform::get_ID", reinterpret_cast<void*>(MonoCSharp_Transform_get_ID));
+	mono_add_internal_call("MonoCSharp.GameObject::AddComponentViaPtr", reinterpret_cast<void*>(MonoCSharp_GameObject_AddComponent));
+	mono_add_internal_call("MonoCSharp.Component::get_TID", reinterpret_cast<void*>(MonoCSharp_Component_get_TID));
+	mono_add_internal_call("MonoCSharp.Component::ComponentConstruct", reinterpret_cast<void*>(MonoCSharp_Component_Construct));
+	mono_add_internal_call("MonoCSharp.Transform::get_TID", reinterpret_cast<void*>(MonoCSharp_Transform_get_TID));
+	mono_add_internal_call("MonoCSharp.Transform::get_Position", reinterpret_cast<void*>(MonoCSharp_Transform_get_Position));
+	mono_add_internal_call("MonoCSharp.Transform::set_Position", reinterpret_cast<void*>(MonoCSharp_Transform_set_Position));
+	mono_add_internal_call("MonoCSharp.Transform::get_Rotation", reinterpret_cast<void*>(MonoCSharp_Transform_get_Rotation));
+	mono_add_internal_call("MonoCSharp.Transform::set_Rotation", reinterpret_cast<void*>(MonoCSharp_Transform_set_Rotation));
+	mono_add_internal_call("MonoCSharp.Transform::get_Scale", reinterpret_cast<void*>(MonoCSharp_Transform_get_Scale));
+	mono_add_internal_call("MonoCSharp.Transform::set_Scale", reinterpret_cast<void*>(MonoCSharp_Transform_set_Scale));
 
 	MonoClass* monoclassTestClass = mono_class_from_name(image, "MonoCSharp", "TestClass");
 
 	const bool include_namespace = true;
-	MonoMethodDesc* method_desc = mono_method_desc_new("MonoCSharp.TestClass:Test()", include_namespace);
+	MonoMethodDesc* method_desc = mono_method_desc_new("MonoCSharp.TestClass:Start()", include_namespace);
 	MonoMethod* method = mono_method_desc_search_in_class(method_desc, monoclassTestClass);
 	mono_method_desc_free(method_desc);
 
