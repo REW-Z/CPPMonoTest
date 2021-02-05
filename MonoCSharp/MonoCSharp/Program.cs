@@ -1,8 +1,11 @@
 ﻿using System;
+using System.IO;
 using System.Reflection;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Xml.Linq;
+using System.Xml.Serialization;
 using System.Runtime.CompilerServices;
 
 namespace MonoCSharp
@@ -21,11 +24,16 @@ namespace MonoCSharp
     public class Scene
     {
         private IntPtr handle = (IntPtr)0;
+        
+        public GameObject[] gameObjects
+        {
+            get { return GetGameObjects(); }
+        }
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public extern static GameObject[] GetGameObjects();
 
         [MethodImpl(MethodImplOptions.InternalCall)]
         public extern static Scene GetMainScene();
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        public extern static GameObject[] GetGameObjects();
         
     }
 
@@ -45,15 +53,25 @@ namespace MonoCSharp
         [MethodImpl(MethodImplOptions.InternalCall)]
         public extern static void DestroyViaPtr(IntPtr ptr);
     }
-    
-    public class GameObject: Object
+
+    public class GameObject : Object
     {
-        
-        public Component[] components
+        public string Name
         {
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            get;
+            get { return get_Name(this.Handle); }
+            set { set_Name(this.Handle, value); }
         }
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern string get_Name(IntPtr ptr);
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern void set_Name(IntPtr ptr, string str);
+
+        public Component[] Components
+        {
+            get { return get_Components(this.Handle); }
+        }
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        public static extern Component[] get_Components(IntPtr ptr);
 
         public int ComponentCount
         {
@@ -130,6 +148,10 @@ namespace MonoCSharp
         public static extern void set_Scale(IntPtr ptr, Vec3 scale);
     }
 
+    public class MonoScript: Component
+    {
+        //public string name;
+    }
     public class TestClass
     {
         public static void HelloWorld()
@@ -143,9 +165,9 @@ namespace MonoCSharp
 
             foreach (GameObject gameobject in gameObjs)
             {
-                Console.WriteLine("==============GameObject===============");
+                Console.WriteLine("==============GameObject: " + gameobject.Name + "===============");
 
-                Component[] components = gameobject.components;
+                Component[] components = gameobject.Components;
 
                 foreach (Component com in components)
                 {
@@ -175,7 +197,9 @@ namespace MonoCSharp
             LogScene();
 
             Console.WriteLine("\n\n\n删除组件...\n\n\n");
-            Component com = Scene.GetGameObjects()[0].components[0];//删除Transform
+            Console.WriteLine("\n\n\n重命名对象0...\n\n\n");
+            Component com = Scene.GetGameObjects()[0].Components[0];//删除Transform
+            Scene.GetGameObjects()[0].Name = "CSharp Renamed Object";
             Object.Destory(com);
 
             LogScene();
@@ -189,14 +213,73 @@ namespace MonoCSharp
 
             LogScene();
 
-
-
+            //序列化
+            Serializer.Serialize(Scene.GetMainScene());
+            
             Console.ReadLine();
-        }
-        public static void Update()
-        {
-            Console.WriteLine("Update...");
         }
     }
     
+    public class Serializer
+    {
+        public static void Serialize(Scene scene)
+        {
+            List<XElement> gameObjectElesList = new List<XElement>();
+            GameObject[] gameObjects = scene.gameObjects;
+            foreach (var gameObject in gameObjects)
+            {
+                List<XElement> comElesList = new List<XElement>();
+                foreach (var com in gameObject.Components)
+                {
+                    string strType = com.GetType().ToString();
+                    strType = strType.Substring(strType.LastIndexOf('.') + 1);
+
+                    List<XElement> PropertyElesList = new List<XElement>();
+                    switch (strType)
+                    {
+                        case "Component":
+                            PropertyElesList.Add(new XElement("NULL"));
+                            break;
+                        case "Transform":
+                            PropertyElesList.Add(new XElement("position", "..."));
+                            PropertyElesList.Add(new XElement("rotation", "..."));
+                            PropertyElesList.Add(new XElement("scale", "..."));
+                            break;
+                        default:
+                            PropertyInfo[] propertyInfos = com.GetType().GetProperties();
+                            FieldInfo[] fieldInfos = com.GetType().GetFields();
+
+                            List<XElement> fieldAndPropertyElesList = new List<XElement>();
+                            foreach (var propertyInfo in propertyInfos)
+                            {
+                                XElement eleProperty = new XElement(propertyInfo.Name, propertyInfo.GetValue(com, null));
+                                fieldAndPropertyElesList.Add(eleProperty);
+                            }
+
+                            foreach (var fieldInfo in fieldInfos)
+                            {
+                                XElement eleField = new XElement(fieldInfo.Name, fieldInfo.GetValue(com));
+                                fieldAndPropertyElesList.Add(eleField);
+                            }
+
+
+                            PropertyElesList.Add(new XElement("ScriptPropertiesAndFields", fieldAndPropertyElesList.ToArray()));
+                            break;
+                    }
+                    
+
+                    XElement eleCom = new XElement(strType, PropertyElesList.ToArray());
+                    comElesList.Add(eleCom);
+                }
+                XElement eleGameObject = new XElement("GameObject", comElesList.ToArray());
+                gameObjectElesList.Add(eleGameObject);
+            }
+            XDocument doc = new XDocument(
+                new XDeclaration("1.0", "utf-8", "yes"),
+                new XElement("Scene", gameObjectElesList.ToArray())
+            );
+
+            doc.Save(Environment.GetFolderPath(Environment.SpecialFolder.Desktop) + "\\Test.scene");
+        }
+    }
 }

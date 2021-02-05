@@ -4,6 +4,10 @@
 #include "pch.h"
 #include <iostream>
 #include <typeinfo>
+#include <algorithm>
+#include <regex>
+#include <cassert>
+#include <io.h>
 #include <vector>
 #include <list>
 #include <string>
@@ -13,7 +17,41 @@
 #include <mono/metadata/debug-helpers.h>
 #include <mono/metadata/mono-config.h>
 using namespace std;
+//前向声明
 
+class Object;
+class GameObject;
+class Component;
+class Transfrom;
+struct vec3;
+
+
+//Assembly
+MonoDomain * domain;
+MonoImage * image_core;
+MonoImage * image_scripts;
+
+
+void getAllFilePath(std::string path, regex flag, vector<string>& files)
+{
+	intptr_t hFile = 0;
+	struct _finddata_t fileinfo;
+	string p;
+
+	if ((hFile = _findfirst(p.assign(path).append("\\*").c_str(), &fileinfo)) != -1)
+	{
+		do
+		{
+			if (regex_search(fileinfo.name, flag))
+			{
+				files.push_back(p.assign(path).append("/").append(fileinfo.name));
+			}
+		} while (_findnext(hFile, &fileinfo) == 0);
+		_findclose(hFile);
+	}
+}
+
+//结构体定义
 struct vec3
 {
 public:
@@ -25,11 +63,8 @@ public:
 	vec3(float newx, float newy, float newz) { x = newx; y = newy; z = newz; }
 };
 
+
 //C++的类定义
-class Object;
-class GameObject;
-class Component;
-class Transfrom;
 
 class Object
 {
@@ -57,10 +92,55 @@ public:
 	Transform() { position = vec3(); rotation = vec3(); scale = vec3(1.0f, 1.0f, 1.0f); }
 };
 
+class MonoScript : public Component
+{
+public:
+	int tid() const { return 4; }
+	MonoObject * objInstance;
+	MonoScript(const char * name)
+	{
+		this->objInstance = nullptr;
+
+		MonoClass * monoclassCurrentScript = mono_class_from_name(image_scripts, "MonoCSharp", name);
+		this->objInstance = mono_object_new(domain, monoclassCurrentScript);
+
+		MonoClassField * field = NULL;
+		void * itor = NULL;
+
+		while (field = mono_class_get_fields(monoclassCurrentScript, &itor))
+		{
+			const char * field_name = mono_field_get_name(field);
+			MonoType * type = mono_field_get_type(field);
+			MonoTypeEnum typeEnum = static_cast<MonoTypeEnum> (mono_type_get_type(type));
+
+			switch (typeEnum)
+			{
+			case MONO_TYPE_OBJECT:
+			{
+				MonoClass * monoclassTmp = mono_class_from_mono_type(type);
+				MonoObject * obj = mono_object_new(domain, monoclassTmp);
+				mono_field_set_value(objInstance, field, &obj);
+				break;
+			}
+			case MONO_TYPE_I4:
+			{
+				int value = 0;
+				mono_field_set_value(objInstance, field, &value);
+				break;
+			}
+			default:
+				break;
+			}
+
+		}
+	}
+};
+
 class GameObject :public Object
 {
 public:
 	int tid() const { return 1; }
+	const char * name;
 	vector<Component *> components;
 };
 class Scene
@@ -87,6 +167,9 @@ MonoClassField * monofieldComponentHandle;
 MonoClass * monoclassTransform;
 MonoClassField * monofieldTransformHandle;
 
+MonoClass * monoclassMonoScript;
+MonoClassField * monofieldMonoScriptHandle;
+
 MonoClass * monoclassVec3;
 MonoClassField * monofieldVec3x;
 MonoClassField * monofieldVec3y;
@@ -94,9 +177,9 @@ MonoClassField * monofieldVec3z;
 
 //Global
 Scene mainScene;
-MonoDomain *domain;
 
 
+//Internal Calls
 void MonoCSharp_Object_Destroy(Object * obj)
 {
 	cout << "try to del.." << (unsigned int)obj  << endl;
@@ -166,15 +249,27 @@ MonoArray* MonoCSharp_Scene_GetGameObjects()
 	return array;
 }
 
+MonoString * MonoCSharp_GameObject_get_Name(const GameObject * gameObject)
+{
+	const char * str = gameObject->name;
+	MonoString * monostr = mono_string_new(domain, str);
+	return monostr;
+}
+
+void MonoCSharp_GameObject_set_Name(GameObject * gameObject, MonoString * monostr)
+{
+	gameObject->name = mono_string_to_utf8(monostr);
+}
+
 int MonoCSharp_GameObject_get_ComponentCount(const GameObject * gameObject)
 {
 	return (int)(gameObject->components.size());
 }
 
-MonoArray * MonoCSharp_GameObject_get_components(MonoObject* objPtr)
+MonoArray * MonoCSharp_GameObject_get_Components(GameObject * gameobject)
 {
-	GameObject * gameobject;
-	mono_field_get_value(objPtr, monofieldGameObjectHandle, reinterpret_cast<void *>(&gameobject));
+	/*GameObject * gameobject;
+	mono_field_get_value(objPtr, monofieldGameObjectHandle, reinterpret_cast<void *>(&gameobject));*/
 
 	MonoArray* array = mono_array_new(domain, monoclassComponent, gameobject->components.size());
 
@@ -187,6 +282,15 @@ MonoArray * MonoCSharp_GameObject_get_components(MonoObject* objPtr)
 			void* handle = gameobject->components[i];
 			mono_field_set_value(com, monofieldTransformHandle, &handle);
 			mono_array_set(array, MonoObject*, i, com);
+		}
+		else if (typeid(*(gameobject->components[i])) == typeid(MonoScript))
+		{
+			MonoObject * com = mono_object_new(domain, monoclassMonoScript);
+			MonoObject * objInstance = reinterpret_cast<MonoScript *>(gameobject->components[i])->objInstance;
+
+			void* handle = gameobject->components[i];
+			mono_field_set_value(objInstance, monofieldMonoScriptHandle, &handle);
+			mono_array_set(array, MonoObject*, i, objInstance);
 		}
 		else if (typeid(*(gameobject->components[i])) == typeid(Component))
 		{
@@ -263,33 +367,62 @@ void MonoCSharp_Transform_set_Scale(Transform * transformPtr, vec3 scale)
 int main()
 {
 	// Program.cs所编译dll所在的位置
-	const char* path = "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoCSharp/MonoCSharp/Program.dll";
+	//const char * path1 = "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoCSharp/MonoCSharp/MonoCSharp.dll";
+	const char * path1 = "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoCSharp/MonoCSharp/Assembly_Engine.dll";
+	const char * path2 = "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoCSharp/MonoCSharp/Assembly_Scripts.dll";
 
 	//---获取应用域---
 	domain = mono_jit_init("Test");
 
-	//-----运行时配置-----
-	//mono_set_dirs("C://Program Files (x86)//Mono//lib", "C://Program Files (x86)//Mono//etc");
+
+	//-----运行时配置----- //不设置使用默认
+	//mono_set_dirs("C:/Program Files (x86)/Mono/lib", "C:/Program Files (x86)/Mono/etc");
 	//mono_config_parse(NULL);
+	//mono_domain_set_config(...);
+	mono_domain_set_config(domain, "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoTest", "Config");
+	
+	//---加载主要程序集---
+	MonoAssembly* assembly_engine = mono_domain_assembly_open(domain, path1);
+	image_core = mono_assembly_get_image(assembly_engine);
+	MonoAssembly * assembly_scripts = mono_domain_assembly_open(domain, path2);
+	image_scripts = mono_assembly_get_image(assembly_scripts);
 
-	//---加载程序集---
-	MonoAssembly* assembly = mono_domain_assembly_open(domain, path);
-	MonoImage* image = mono_assembly_get_image(assembly);
-
-	monoclassScene = mono_class_from_name(image, "MonoCSharp", "Scene");
+	monoclassScene = mono_class_from_name(image_core, "MonoCSharp", "Scene");
 	monofieldSceneHandle = mono_class_get_field_from_name(monoclassScene, "handle");
-	monoclassGameObject = mono_class_from_name(image, "MonoCSharp", "GameObject");
+	monoclassGameObject = mono_class_from_name(image_core, "MonoCSharp", "GameObject");
 	monofieldGameObjectHandle = mono_class_get_field_from_name(monoclassGameObject, "handle");
-	monoclassComponent = mono_class_from_name(image, "MonoCSharp", "Component");
+	monoclassComponent = mono_class_from_name(image_core, "MonoCSharp", "Component");
 	monofieldComponentHandle = mono_class_get_field_from_name(monoclassComponent, "handle");
-	monoclassTransform = mono_class_from_name(image, "MonoCSharp", "Transform");
+	monoclassTransform = mono_class_from_name(image_core, "MonoCSharp", "Transform");
 	monofieldTransformHandle = mono_class_get_field_from_name(monoclassTransform, "handle");
+	monoclassMonoScript = mono_class_from_name(image_core, "MonoCSharp", "MonoScript");
+	monofieldMonoScriptHandle = mono_class_get_field_from_name(monoclassMonoScript, "handle");
 
-	monoclassVec3 = mono_class_from_name(image, "MonoCSharp", "Vec3");
+	monoclassVec3 = mono_class_from_name(image_core, "MonoCSharp", "Vec3");
 	monofieldVec3x = mono_class_get_field_from_name(monoclassVec3, "x");
 	monofieldVec3y = mono_class_get_field_from_name(monoclassVec3, "y");
 	monofieldVec3z = mono_class_get_field_from_name(monoclassVec3, "z");
 
+
+
+
+	////?????????????????????
+	//const char* path1 = "C:/Users/dell-pc/Desktop/Test/MonoC++Test/MonoCSharp/MonoCSharp/TestScript.dll";
+	//MonoAssembly* assembly1 = mono_domain_assembly_open(domain, path1);
+	//MonoImage* image1 = mono_assembly_get_image(assembly1);
+
+	//MonoClass * monoclassTestScript = mono_class_from_name(image1, "MonoCSharp", "TestScript");
+	//const bool include_namespace1 = true;
+	//MonoMethodDesc* method_test_desc = mono_method_desc_new("MonoCSharp.TestScript:Update()", include_namespace1);
+	//MonoMethod* method_test = mono_method_desc_search_in_class(method_test_desc, monoclassTestScript);
+	//mono_method_desc_free(method_test_desc);
+
+	//MonoObject * obj1 = mono_object_new(domain, monoclassTestScript);
+	//mono_runtime_object_init(obj1);
+	//mono_runtime_invoke(method_test, &obj1, NULL, NULL);
+
+
+	
 	// =====================================================测试
 
 
@@ -300,9 +433,12 @@ int main()
 	{
 		Transform * transform = new Transform();
 		Component * component = new Component();
+		MonoScript * script = new MonoScript("TestScript");
 		GameObject * newObj = new GameObject();
 		newObj->components.push_back(transform);
 		newObj->components.push_back(component);
+		newObj->components.push_back(script);
+		newObj->name = "null";
 		transform->gameObject = newObj;
 		component->gameObject = newObj;
 		mainScene.gameObjects.push_back(newObj);
@@ -315,14 +451,15 @@ int main()
 		cout << "----游戏对象添加完毕----" << endl;
 	}
 	cout << "**************************************************************" << endl;
-
 	//======================================================交互测试
 
 	mono_add_internal_call("MonoCSharp.Scene::GetMainScene()", reinterpret_cast<void*>(MonoCSharp_Scene_GetMainScene));
 	mono_add_internal_call("MonoCSharp.Object::DestroyViaPtr", reinterpret_cast<void*>(MonoCSharp_Object_Destroy));
 	mono_add_internal_call("MonoCSharp.Scene::GetGameObjects()", reinterpret_cast<void*>(MonoCSharp_Scene_GetGameObjects));
+	mono_add_internal_call("MonoCSharp.GameObject::get_Name", reinterpret_cast<void*>(MonoCSharp_GameObject_get_Name));
+	mono_add_internal_call("MonoCSharp.GameObject::set_Name", reinterpret_cast<void*>(MonoCSharp_GameObject_set_Name));
 	mono_add_internal_call("MonoCSharp.GameObject::get_ComponentCount", reinterpret_cast<void*>(MonoCSharp_GameObject_get_ComponentCount));
-	mono_add_internal_call("MonoCSharp.GameObject::get_components", reinterpret_cast<void*>(MonoCSharp_GameObject_get_components));
+	mono_add_internal_call("MonoCSharp.GameObject::get_Components", reinterpret_cast<void*>(MonoCSharp_GameObject_get_Components));
 	mono_add_internal_call("MonoCSharp.GameObject::AddComponentViaPtr", reinterpret_cast<void*>(MonoCSharp_GameObject_AddComponent));
 	mono_add_internal_call("MonoCSharp.Component::get_TID", reinterpret_cast<void*>(MonoCSharp_Component_get_TID));
 	mono_add_internal_call("MonoCSharp.Component::ComponentConstruct", reinterpret_cast<void*>(MonoCSharp_Component_Construct));
@@ -334,7 +471,7 @@ int main()
 	mono_add_internal_call("MonoCSharp.Transform::get_Scale", reinterpret_cast<void*>(MonoCSharp_Transform_get_Scale));
 	mono_add_internal_call("MonoCSharp.Transform::set_Scale", reinterpret_cast<void*>(MonoCSharp_Transform_set_Scale));
 
-	MonoClass* monoclassTestClass = mono_class_from_name(image, "MonoCSharp", "TestClass");
+	MonoClass* monoclassTestClass = mono_class_from_name(image_core, "MonoCSharp", "TestClass");
 
 	const bool include_namespace = true;
 	MonoMethodDesc* method_desc = mono_method_desc_new("MonoCSharp.TestClass:Start()", include_namespace);
@@ -342,6 +479,8 @@ int main()
 	mono_method_desc_free(method_desc);
 
 	mono_runtime_invoke(method, NULL, NULL, NULL);
+
+
 
 	//======================================================END
 	//释放应用域

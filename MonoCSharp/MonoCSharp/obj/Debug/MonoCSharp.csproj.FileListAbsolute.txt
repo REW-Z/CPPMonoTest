@@ -1,0 +1,6 @@
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\bin\Debug\MonoCSharp.dll
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\bin\Debug\MonoCSharp.pdb
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\obj\Debug\MonoCSharp.csprojAssemblyReference.cache
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\obj\Debug\MonoCSharp.csproj.CoreCompileInputs.cache
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\obj\Debug\MonoCSharp.dll
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoCSharp\MonoCSharp\obj\Debug\MonoCSharp.pdb

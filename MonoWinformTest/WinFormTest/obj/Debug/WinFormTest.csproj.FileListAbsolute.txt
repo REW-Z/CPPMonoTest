@@ -1,0 +1,12 @@
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\bin\Debug\WinFormTest.exe
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\bin\Debug\WinFormTest.pdb
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\bin\Debug\MonoCSharp.dll
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\bin\Debug\MonoCSharp.pdb
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.csprojAssemblyReference.cache
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.Properties.Resources.resources
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.csproj.GenerateResource.cache
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.csproj.CoreCompileInputs.cache
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.csproj.CopyComplete
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.exe
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.pdb
+C:\Users\dell-pc\Desktop\Test\MonoC++Test\MonoWinformTest\WinFormTest\obj\Debug\WinFormTest.ClassA.resources

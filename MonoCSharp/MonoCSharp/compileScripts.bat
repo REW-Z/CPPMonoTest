@@ -1,0 +1,1 @@
+mcs -reference:Assembly_Engine.dll TestScript.cs TestScript2.cs -out:Assembly_Scripts.dll -target:library
