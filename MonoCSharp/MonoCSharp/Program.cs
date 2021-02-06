@@ -1,4 +1,7 @@
-﻿using System;
+﻿/// 1. Construct MonoScript Component 
+///
+
+using System;
 using System.IO;
 using System.Reflection;
 using System.Collections.Generic;
@@ -10,6 +13,16 @@ using System.Runtime.CompilerServices;
 
 namespace MonoCSharp
 {
+    public enum ObjectType
+    {
+        Object = 0,
+        GameObject = 1,
+        Component = 2,
+        Transform = 3,
+        MonoScript = 4,
+        Scene = 999
+    }
+
     public struct Vec3
     {
         public float x, y, z;
@@ -18,6 +31,10 @@ namespace MonoCSharp
             x = newx;
             y = newy;
             z = newz;
+        }
+        public override string ToString()
+        {
+            return (x + "," + y + "," + z);
         }
     }
 
@@ -95,10 +112,27 @@ namespace MonoCSharp
     {
         public Component()
         {
-            this.handle = ComponentConstruct();
+            if(this.GetType() == typeof(Component))
+            {
+                this.handle = ComponentConstruct((int)ObjectType.Component);
+            }
+            else if (this.GetType() == typeof(Transform))
+            {
+                this.handle = ComponentConstruct((int)ObjectType.Transform);
+            }
+            else if (this is MonoScript)
+            {
+                string strScriptName = this.GetType().ToString();
+                strScriptName = strScriptName.Substring(strScriptName.LastIndexOf('.') + 1);
+                this.handle = ComponentConstruct((int)ObjectType.MonoScript, strScriptName);
+            }
+            else
+            {
+                Console.WriteLine("Unknown Component Type");
+            }
         }
         [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern IntPtr ComponentConstruct();
+        public static extern IntPtr ComponentConstruct(int tid, string name = null);
 
 
         public virtual int TID
@@ -152,6 +186,10 @@ namespace MonoCSharp
     {
         //public string name;
     }
+    public class TTT : MonoScript
+    {
+
+    }
     public class TestClass
     {
         public static void HelloWorld()
@@ -175,6 +213,7 @@ namespace MonoCSharp
                     Console.WriteLine("TID：" + com.TID);
 
                     Type type = com.GetType();
+                    Console.WriteLine(type.ToString());
                     if(type == typeof(Transform))
                     {
                         Transform t = (Transform)com;
@@ -184,7 +223,7 @@ namespace MonoCSharp
                     }
                     else
                     {
-                        Console.WriteLine("Value: (NONE)");
+                        Console.WriteLine("NoValue");
                     }
                     Console.WriteLine("----------------");
                 }
@@ -192,7 +231,7 @@ namespace MonoCSharp
                 Console.WriteLine("=======================================");
             }
         }
-        public static void Start()
+        public static void ComponentDeleteAddTest()
         {
             LogScene();
 
@@ -204,12 +243,18 @@ namespace MonoCSharp
 
             LogScene();
 
-            Console.WriteLine("\n\n\n添加组件...\n\n\n");
+            Console.WriteLine("\n\n\n创建组件...");
             Transform newcom = new Transform();
+            Console.WriteLine("添加组件...\n\n\n");
             newcom.Position = new Vec3(9f, 9f, 9f);
             newcom.Rotation = new Vec3(90f, 180f, 270f);
             newcom.Scale = new Vec3(1.1f, 1.1f, 1.1f);
             Scene.GetGameObjects()[0].AddComponent(newcom);//添加新的Transform
+
+            LogScene();
+
+            TTT t = new TTT();
+            Scene.GetGameObjects()[0].AddComponent(t);
 
             LogScene();
 
@@ -241,9 +286,10 @@ namespace MonoCSharp
                             PropertyElesList.Add(new XElement("NULL"));
                             break;
                         case "Transform":
-                            PropertyElesList.Add(new XElement("position", "..."));
-                            PropertyElesList.Add(new XElement("rotation", "..."));
-                            PropertyElesList.Add(new XElement("scale", "..."));
+                            Transform trans = com as Transform;
+                            PropertyElesList.Add(new XElement("position", trans.Position.ToString()));
+                            PropertyElesList.Add(new XElement("rotation", trans.Rotation.ToString()));
+                            PropertyElesList.Add(new XElement("scale", trans.Scale.ToString()));
                             break;
                         default:
                             PropertyInfo[] propertyInfos = com.GetType().GetProperties();
@@ -252,8 +298,11 @@ namespace MonoCSharp
                             List<XElement> fieldAndPropertyElesList = new List<XElement>();
                             foreach (var propertyInfo in propertyInfos)
                             {
-                                XElement eleProperty = new XElement(propertyInfo.Name, propertyInfo.GetValue(com, null));
-                                fieldAndPropertyElesList.Add(eleProperty);
+                                if(propertyInfo.Name != "Handle")
+                                {
+                                    XElement eleProperty = new XElement(propertyInfo.Name, propertyInfo.GetValue(com, null));
+                                    fieldAndPropertyElesList.Add(eleProperty);
+                                }
                             }
 
                             foreach (var fieldInfo in fieldInfos)
@@ -280,6 +329,20 @@ namespace MonoCSharp
             );
 
             doc.Save(Environment.GetFolderPath(Environment.SpecialFolder.Desktop) + "\\Test.scene");
+        }
+
+        public static Scene Deserialize(string path)
+        {
+            XDocument doc = XDocument.Load(path);
+            XElement eleScene = doc.Element("Scene");
+
+            foreach (XElement eleGameObject in eleScene.Elements())
+            {
+                //GameObject gameobj = new GameObject();
+                //...
+            }
+
+            return null;
         }
     }
 }

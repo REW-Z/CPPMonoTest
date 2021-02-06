@@ -102,6 +102,16 @@ public:
 		this->objInstance = nullptr;
 
 		MonoClass * monoclassCurrentScript = mono_class_from_name(image_scripts, "MonoCSharp", name);
+		if (monoclassCurrentScript == nullptr)
+		{
+			//cout << "didn't find class in Assembly_Scripts, now query in Assembly_Engine..." << endl;
+			monoclassCurrentScript = mono_class_from_name(image_core, "MonoCSharp", name);
+		}
+		if (monoclassCurrentScript == nullptr)
+		{
+			//cout << "no class founded!!!" << endl;
+			return;
+		}
 		this->objInstance = mono_object_new(domain, monoclassCurrentScript);
 
 		MonoClassField * field = NULL;
@@ -143,6 +153,7 @@ public:
 	const char * name;
 	vector<Component *> components;
 };
+
 class Scene
 {
 public:
@@ -318,9 +329,25 @@ int MonoCSharp_Component_get_TID(MonoObject * objPtr)
 	return component->tid();
 }
 
-void * MonoCSharp_Component_Construct()
+void * MonoCSharp_Component_Construct(int tid, MonoString * monostr)
 {
-	Transform * com = new Transform();
+	Component * com = nullptr;
+	const char * name = mono_string_to_utf8(monostr);
+	switch (tid)
+	{
+	case 2:
+		com = new Component();
+		break;
+	case 3:
+		com = new Transform();
+		break;
+	case 4:
+		com = new MonoScript(name);
+		break;
+	default:
+		com = new Component();
+		break;
+	}
 	return reinterpret_cast<void *>(com);
 }
 
@@ -474,7 +501,7 @@ int main()
 	MonoClass* monoclassTestClass = mono_class_from_name(image_core, "MonoCSharp", "TestClass");
 
 	const bool include_namespace = true;
-	MonoMethodDesc* method_desc = mono_method_desc_new("MonoCSharp.TestClass:Start()", include_namespace);
+	MonoMethodDesc* method_desc = mono_method_desc_new("MonoCSharp.TestClass:ComponentDeleteAddTest()", include_namespace);
 	MonoMethod* method = mono_method_desc_search_in_class(method_desc, monoclassTestClass);
 	mono_method_desc_free(method_desc);
 
